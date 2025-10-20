@@ -1,0 +1,89 @@
+# Permitted to be committed directly into the repository.
+name: Create OctoAcme README PR
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: write
+  pull-requests: write
+  issues: write
+
+jobs:
+  create-pr:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          token: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Configure git
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "actions@github.com"
+
+      - name: Create branch and add README
+        env:
+          BRANCH: docs/add-octoacme-readme
+        run: |
+          set -e
+          # Create branch (or switch if it already exists)
+          if git ls-remote --exit-code --heads origin "${BRANCH}"; then
+            git fetch origin ${BRANCH}:${BRANCH}
+          fi
+          git checkout -b "${BRANCH}" || git checkout "${BRANCH}"
+
+          mkdir -p docs
+          cat > docs/README.md <<'EOF'
+# OctoAcme — Project Management Processes
+
+This folder collects OctoAcme's project management process documents and templates used to run cross-functional projects. The goal is to give teams a consistent, lightweight way to move from idea to production while keeping stakeholders aligned, reducing risk, and continuously improving.
+
+OctoAcme follows an iterative, customer-first lifecycle: Initiation → Planning → Execution → Release → Close & Retrospective. Initiation uses a short Project One-pager to validate the problem, stakeholders, and success metrics. Planning breaks approved work into shippable increments and produces a prioritized backlog, estimates, a Definition of Done, and a release milestone map. Execution is run through a project board (Backlog → Ready → In Progress → In Review → QA → Done) with a PR workflow that emphasizes small changes, linked acceptance criteria, CI checks, and at least one review before merging. Releases follow a checklist with pre-release verification, smoke tests, release notes, and rollback plans.
+
+Roles and responsibilities are explicit: Project Managers coordinate delivery and communications, Product Managers define outcomes and prioritize the backlog, Developers implement and test, and QA validates acceptance criteria. Communication cadence includes daily standups, weekly PM+PdM syncs, regular demos, and milestone or weekly stakeholder updates. Risks and dependencies are tracked in a simple Risk Register and escalated along defined paths from team triage to sponsor-level when necessary.
+
+Quality assurance combines automated and manual checks: unit and integration tests, CI security scans, end-to-end smoke tests for critical flows, and manual QA for feature acceptance when needed. Retrospectives and continuous improvement are baked into the process — action items are tracked back into the backlog and reviewed in PM syncs to close the loop on process and product improvements. See the individual docs in this folder for templates, checklists, and detailed guidance.
+EOF
+
+          git add docs/README.md
+          if git diff --staged --quiet; then
+            echo "No changes to commit."
+          else
+            git commit -m "docs: add OctoAcme process README to docs/"
+            git push -u "https://x-access-token:${{ secrets.GITHUB_TOKEN }}@github.com/${{ github.repository }}" ${BRANCH}
+          fi
+
+      - name: Create Pull Request, request reviewer, and link to issue
+        uses: actions/github-script@v7
+        with:
+          github-token: ${{ secrets.GITHUB_TOKEN }}
+          script: |
+            const owner = context.repo.owner;
+            const repo = context.repo.repo;
+            const head = 'docs/add-octoacme-readme';
+            const base = 'main';
+            const title = 'docs: add OctoAcme process README';
+            const body = `This PR adds docs/README.md — a concise overview of the OctoAcme project management processes (lifecycle, core workflows, roles/personas, communication cadence, risk handling, and quality assurance practices). The new README points readers to the detailed process documents already in docs/ and provides a single place to surface the program-level overview.`;
+            // Create PR
+            const pr = await github.rest.pulls.create({ owner, repo, title, head, base, body });
+            const prNumber = pr.data.number;
+            // Request reviewer (username provided)
+            try {
+              await github.rest.pulls.requestReviewers({
+                owner,
+                repo,
+                pull_number: prNumber,
+                reviewers: ['aliciakschroeder']
+              });
+            } catch (err) {
+              core.info(`Could not add reviewer: ${err.message}`);
+            }
+            // Link PR to issue #2 by adding a comment in the issue
+            await github.rest.issues.createComment({
+              owner,
+              repo,
+              issue_number: 2,
+              body: `Linked PR: ${pr.data.html_url}`
+            });
+            return pr.data.html_url
